@@ -56,8 +56,8 @@ pip install -r requirements.txt
 
 Pull and run the latest Docker image:
 ```bash
-docker pull ghcr.io/yourusername/generate-keypair:latest
-docker run -p 8501:8501 ghcr.io/yourusername/generate-keypair:latest
+docker pull ghcr.io/musicsms/generate-keypair:latest
+docker run -p 8501:8501 ghcr.io/musicsms/generate-keypair:latest
 ```
 
 Or build locally:
