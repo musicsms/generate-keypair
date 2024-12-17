@@ -14,6 +14,9 @@ class RSAService:
         Generate an RSA keypair with customizable parameters
         Returns: (public_key, private_key) as PEM strings
         """
+        if key_size < 2048:
+            raise ValueError("Key size must be at least 2048 bits for security")
+
         # Generate private key
         private_key = rsa.generate_private_key(
             public_exponent=public_exponent,

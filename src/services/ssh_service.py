@@ -23,37 +23,44 @@ class SSHService:
         Generate an SSH keypair with customizable parameters
         Returns: (public_key, private_key)
         """
-        key = None
-        
         if key_type.lower() == "rsa":
-            key = paramiko.RSAKey.generate(key_size)
+            # Generate RSA key
+            key = paramiko.RSAKey.generate(bits=key_size)
+            
             # Get private key
             priv_file = io.StringIO()
             key.write_private_key(priv_file, password=password.encode() if password else None)
             private_key = priv_file.getvalue()
             
             # Get public key in OpenSSH format
-            public_key = f"{key.get_name()} {key.get_base64()} {comment}"
+            public_key = f"ssh-rsa {key.get_base64()} {comment}"
+            
+            return public_key, private_key
             
         elif key_type.lower() == "ed25519":
-            # Generate Ed25519 key using cryptography
+            # Generate Ed25519 key
             private_key_obj = ed25519.Ed25519PrivateKey.generate()
             public_key_obj = private_key_obj.public_key()
             
-            # Get the raw key bytes
+            # Export private key
             private_bytes = private_key_obj.private_bytes(
                 encoding=Encoding.PEM,
                 format=PrivateFormat.OpenSSH,
                 encryption_algorithm=BestAvailableEncryption(password.encode()) if password else NoEncryption()
             )
+            private_key = private_bytes.decode()
+            
+            # Export public key
             public_bytes = public_key_obj.public_bytes(
-                encoding=Encoding.OpenSSH,
-                format=PublicFormat.OpenSSH
+                encoding=Encoding.Raw,
+                format=PublicFormat.Raw
             )
             
-            private_key = private_bytes.decode()
-            public_key = f"{public_bytes.decode()} {comment}"
+            # Format OpenSSH public key
+            key_type_bytes = b"ssh-ed25519"
+            encoded_key = base64.b64encode(key_type_bytes + b"\x00\x00\x00 " + public_bytes).decode()
+            public_key = f"ssh-ed25519 {encoded_key} {comment}"
+            
+            return public_key, private_key
         else:
-            raise ValueError("Invalid key type")
-
-        return public_key, private_key
+            raise ValueError(f"Unsupported key type: {key_type}. Supported types are: rsa, ed25519")

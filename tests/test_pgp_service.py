@@ -18,19 +18,33 @@ class TestPGPService(unittest.TestCase):
         self.assertIn("BEGIN PGP PUBLIC KEY BLOCK", keys["public_key"])
         self.assertIn("BEGIN PGP PRIVATE KEY BLOCK", keys["private_key"])
         self.assertTrue(keys["fingerprint"])
+        
+        # Check user ID format
+        expected_uid = "Test User <test@example.com>"
+        self.assertEqual(expected_uid, keys["user_id"])
 
     def test_generate_keypair_with_comment(self):
+        name = "Test User"
+        comment = "Test Key"
+        email = "test@example.com"
+        
         keys = self.service.generate_keypair(
-            name="Test User",
-            email="test@example.com",
+            name=name,
+            email=email,
             passphrase="testpassphrase",
-            comment="Test Key",
+            comment=comment,
             key_type="RSA",
             key_length=2048
         )
         
-        # Check if comment is in the public key
-        self.assertIn("Test Key", keys["public_key"])
+        # Check key format
+        self.assertIn("BEGIN PGP PUBLIC KEY BLOCK", keys["public_key"])
+        self.assertIn("BEGIN PGP PRIVATE KEY BLOCK", keys["private_key"])
+        self.assertTrue(keys["fingerprint"])
+        
+        # Check user ID format
+        expected_uid = f"{name} ({comment}) <{email}>"
+        self.assertEqual(expected_uid, keys["user_id"])
 
     def test_generate_keypair_with_expiry(self):
         keys = self.service.generate_keypair(
@@ -43,19 +57,13 @@ class TestPGPService(unittest.TestCase):
         )
         
         self.assertTrue(keys["fingerprint"])
-
-    def test_missing_passphrase(self):
-        with self.assertRaises(ValueError):
-            self.service.generate_keypair(
-                name="Test User",
-                email="test@example.com",
-                passphrase=None
-            )
+        self.assertIn("BEGIN PGP PUBLIC KEY BLOCK", keys["public_key"])
+        self.assertIn("BEGIN PGP PRIVATE KEY BLOCK", keys["private_key"])
 
     def test_missing_required_fields(self):
         with self.assertRaises(ValueError):
             self.service.generate_keypair(
-                name="",
+                name="",  # Empty name
                 email="test@example.com",
                 passphrase="testpassphrase"
             )

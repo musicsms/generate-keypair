@@ -1,6 +1,7 @@
-streamlit==1.29.0
-cryptography==41.0.7
-python-gnupg==0.5.1
-paramiko==3.3.1
-pytest==7.4.3
-pytest-cov==4.1.0
+streamlit==1.41.1
+python-gnupg==0.5.3
+paramiko==3.5.0
+cryptography==44.0.0
+pyopenssl==24.3.0
+pytest==8.3.4
+pytest-cov==6.0.0
