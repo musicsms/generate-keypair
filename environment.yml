@@ -1,0 +1,13 @@
+name: keypair-gen
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - streamlit=1.29.0
+  - cryptography=41.0.7
+  - paramiko=3.3.1
+  - pip
+  - pip:
+    - python-gnupg==0.5.1
+    - pycryptodome==3.19.0
