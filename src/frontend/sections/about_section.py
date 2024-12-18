@@ -10,6 +10,7 @@ def render_about_section():
     * 🔐 **RSA Keys**: Generate RSA key pairs for encryption and signing
     * 🔒 **SSH Keys**: Generate SSH key pairs for secure authentication
     * 🔏 **PGP Keys**: Create PGP keys for encryption and digital signatures
+    * 📜 **CSR Generator**: Create Certificate Signing Requests for SSL/TLS certificates
     
     #### Security Notes:
     * All keys are generated using cryptographically secure methods
@@ -22,4 +23,6 @@ def render_about_section():
     * Use different keys for different purposes
     * Regularly rotate your passwords and keys
     * Back up your keys securely
+    * Never share your CSR private key with anyone
+    * Verify certificate details before submitting CSR
     """)
