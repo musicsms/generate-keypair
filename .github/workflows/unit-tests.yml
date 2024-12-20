@@ -1,0 +1,51 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [ dev ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/unit-tests.yml'
+  pull_request:
+    branches: [ dev ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/unit-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  setup:
+    uses: ./.github/workflows/reusable-setup.yml
+    with:
+      python-version: "3.12"
+      install-dependencies: true
+      install-dev-dependencies: true
+
+  unit-tests:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/ -n auto \
+          --ignore=tests/api \
+          --ignore=tests/integration \
+          --cov=src \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --cov-fail-under=85
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: unit-tests
+        name: codecov-unit
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

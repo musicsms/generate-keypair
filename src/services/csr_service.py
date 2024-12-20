@@ -3,6 +3,7 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from typing import Optional
+from cryptography.exceptions import InvalidKey
 
 class CSRService:
     @staticmethod
@@ -41,44 +42,52 @@ class CSRService:
 
         try:
             # Load private key
-            private_key = serialization.load_pem_private_key(
-                private_key_pem.encode(),
-                password=password.encode() if password else None,
-                backend=default_backend()
+            try:
+                private_key = serialization.load_pem_private_key(
+                    private_key_pem.encode(),
+                    password=password.encode() if password else None,
+                    backend=default_backend()
+                )
+            except ValueError:
+                if "encrypted" in private_key_pem and not password:
+                    raise ValueError("Password required for encrypted private key")
+                elif password and "encrypted" not in private_key_pem:
+                    raise ValueError("Password provided for unencrypted private key")
+                else:
+                    raise ValueError("Invalid private key format")
+            except Exception as e:
+                raise ValueError(f"Error loading private key: {str(e)}")
+
+            # Build CSR subject
+            subject = []
+            if common_name:
+                subject.append(x509.NameAttribute(NameOID.COMMON_NAME, common_name))
+            if country:
+                subject.append(x509.NameAttribute(NameOID.COUNTRY_NAME, country))
+            if state:
+                subject.append(x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, state))
+            if locality:
+                subject.append(x509.NameAttribute(NameOID.LOCALITY_NAME, locality))
+            if organization:
+                subject.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization))
+            if organizational_unit:
+                subject.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, organizational_unit))
+            if email:
+                subject.append(x509.NameAttribute(NameOID.EMAIL_ADDRESS, email))
+
+            # Generate CSR
+            csr = x509.CertificateSigningRequestBuilder().subject_name(
+                x509.Name(subject)
+            ).sign(
+                private_key,
+                hashes.SHA256(),
+                default_backend()
             )
+
+            # Return CSR in PEM format
+            return csr.public_bytes(serialization.Encoding.PEM).decode()
+
+        except ValueError as e:
+            raise e
         except Exception as e:
-            raise ValueError(f"Invalid private key: {str(e)}")
-
-        # Prepare subject attributes
-        attributes = []
-        attributes.append(x509.NameAttribute(NameOID.COMMON_NAME, common_name))
-        
-        if country:
-            attributes.append(x509.NameAttribute(NameOID.COUNTRY_NAME, country))
-        if state:
-            attributes.append(x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, state))
-        if locality:
-            attributes.append(x509.NameAttribute(NameOID.LOCALITY_NAME, locality))
-        if organization:
-            attributes.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization))
-        if organizational_unit:
-            attributes.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, organizational_unit))
-        if email:
-            attributes.append(x509.NameAttribute(NameOID.EMAIL_ADDRESS, email))
-
-        try:
-            # Create CSR
-            builder = x509.CertificateSigningRequestBuilder()
-            builder = builder.subject_name(x509.Name(attributes))
-            
-            csr = builder.sign(
-                private_key=private_key,
-                algorithm=hashes.SHA256(),
-                backend=default_backend()
-            )
-
-            # Serialize CSR to PEM format
-            csr_pem = csr.public_bytes(serialization.Encoding.PEM)
-            return csr_pem.decode()
-        except Exception as e:
-            raise ValueError(f"Error creating CSR: {str(e)}")
+            raise ValueError(f"Error generating CSR: {str(e)}")

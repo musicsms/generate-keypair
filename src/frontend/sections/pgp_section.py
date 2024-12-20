@@ -19,13 +19,6 @@ def render_pgp_section():
             )
         
         with col2:
-            key_type = st.selectbox(
-                "Key Type",
-                options=["RSA", "DSA"],
-                index=0,
-                help="RSA is recommended for most users",
-                key="pgp_gen_key_type_select"
-            )
             key_length = st.select_slider(
                 "Key Length (bits)",
                 options=[2048, 3072, 4096],
@@ -41,38 +34,37 @@ def render_pgp_section():
                 help="0 means no expiry, max 10 years",
                 key="pgp_gen_expiry_input"
             )
-        
-        passphrase = st.text_input(
-            "Passphrase (Required)",
-            type="password",
-            help="This passphrase will protect your private key",
-            key="pgp_gen_passphrase_input"
-        )
+            passphrase = st.text_input(
+                "Passphrase (Required)",
+                type="password",
+                help="This passphrase will protect your private key",
+                key="pgp_gen_passphrase_input"
+            )
     
     if st.button("🔐 Generate PGP Key Pair", key="pgp_gen_create_button", use_container_width=True):
-        if not passphrase:
-            st.error("⚠️ Passphrase is required for PGP key generation!")
-            return
-            
         if not name or not email:
             st.error("⚠️ Name and email are required!")
             return
             
-        service = PGPService()
+        if not passphrase:
+            st.error("⚠️ Passphrase is required for PGP key generation!")
+            return
+
         try:
-            # Convert years to days for GPG (0 means no expiry)
-            expire_date = str(expiry_years * 365) if expiry_years > 0 else "0"
+            # Convert years to days for expiry
+            expiry_days = expiry_years * 365 if expiry_years > 0 else None
             
-            keys = service.generate_keypair(
+            # Generate the keys
+            generator = PGPService()
+            public_key, private_key = generator.generate_keypair(
                 name=name,
                 email=email,
-                comment=comment,
-                passphrase=passphrase,
-                key_type=key_type,
                 key_length=key_length,
-                expire_date=expire_date
+                passphrase=passphrase,
+                comment=comment if comment else None,
+                expiry_days=expiry_days
             )
-            
+
             # Generate filenames
             private_filename = get_key_filename("pgp")
             public_filename = get_key_filename("pgp", is_public=True)
@@ -80,17 +72,17 @@ def render_pgp_section():
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("##### Private Key (Keep Secret!):")
-                st.code(keys["private_key"], language="text")
+                st.code(private_key, language="text")
                 download_button(
-                    keys["private_key"],
+                    private_key,
                     private_filename,
                     "⬇️ Download Private Key"
                 )
             with col2:
                 st.markdown("##### Public Key (Safe to Share):")
-                st.code(keys["public_key"], language="text")
+                st.code(public_key, language="text")
                 download_button(
-                    keys["public_key"],
+                    public_key,
                     public_filename,
                     "⬇️ Download Public Key"
                 )

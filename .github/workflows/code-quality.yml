@@ -1,0 +1,44 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ dev ]
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - '.github/workflows/code-quality.yml'
+  pull_request:
+    branches: [ dev ]
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - '.github/workflows/code-quality.yml'
+  workflow_dispatch:
+
+jobs:
+  setup:
+    uses: ./.github/workflows/reusable-setup.yml
+    with:
+      python-version: "3.12"
+      install-dependencies: false
+      install-dev-dependencies: true
+
+  code-quality:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check formatting
+      run: black --check src tests
+    
+    - name: Lint with flake8
+      run: |
+        flake8 src tests \
+          --max-line-length=100 \
+          --statistics \
+          --count \
+          --show-source
+    
+    - name: Type checking
+      run: mypy src tests --ignore-missing-imports

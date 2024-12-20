@@ -1,8 +1,9 @@
 import gnupg
-from typing import Dict
+from typing import Dict, Tuple, Optional
 import tempfile
 import os
 import shutil
+from datetime import datetime, timedelta
 
 class PGPService:
     def __init__(self):
@@ -19,23 +20,18 @@ class PGPService:
         self,
         name: str,
         email: str,
-        passphrase: str = None,
-        comment: str = "",
-        key_type: str = "RSA",
         key_length: int = 2048,
-        subkey_type: str = "RSA",
-        subkey_length: int = 2048,
-        expire_date: str = "0"
-    ) -> Dict[str, str]:
+        passphrase: Optional[str] = None,
+        comment: Optional[str] = None,
+        expiry_days: Optional[int] = None
+    ) -> Tuple[str, str]:
         """
         Generate a PGP keypair with customizable parameters
-        Returns: Dictionary containing public key, private key, fingerprint, and user ID
+        Returns: Tuple containing (public key, private key)
         """
         # Validate required fields
         if not name or not email:
             raise ValueError("Name and email are required for PGP key generation")
-        if not passphrase:
-            raise ValueError("Passphrase is required for PGP key generation")
 
         # Build user ID string
         user_id = name
@@ -43,15 +39,20 @@ class PGPService:
             user_id += f" ({comment})"
         user_id += f" <{email}>"
 
+        # Calculate expiry date
+        expire_date = "0"
+        if expiry_days:
+            expire_date = str(expiry_days)
+
         # Create key input data
         key_input = {
-            'key_type': key_type,
+            'key_type': 'RSA',
             'key_length': key_length,
-            'subkey_type': subkey_type,
-            'subkey_length': subkey_length,
+            'subkey_type': 'RSA',
+            'subkey_length': key_length,
             'name_real': name,
             'name_email': email,
-            'passphrase': passphrase,
+            'passphrase': passphrase if passphrase else '',
             'expire_date': expire_date,
         }
 
@@ -60,7 +61,6 @@ class PGPService:
             key_input['name_comment'] = comment
 
         # Generate key
-        print(f"\nGenerating key for user ID: {user_id}")
         key = self.gpg.gen_key(self.gpg.gen_key_input(**key_input))
         
         if not key.fingerprint:
@@ -76,32 +76,14 @@ class PGPService:
             key.fingerprint,
             secret=True,
             armor=True,
-            passphrase=passphrase
+            passphrase=passphrase if passphrase else ''
         )
         if not private_key:
             raise ValueError("Failed to export private key")
 
-        # Get key info
-        keys = self.gpg.list_keys()
-        key_info = next((k for k in keys if k['fingerprint'] == key.fingerprint), None)
-        
-        if not key_info:
-            raise ValueError("Could not find generated key in keyring")
-
-        # Get the actual user ID from the key
-        actual_uid = key_info['uids'][0] if key_info.get('uids') else user_id
-
-        return {
-            "public_key": public_key,
-            "private_key": private_key,
-            "fingerprint": key.fingerprint,
-            "user_id": actual_uid
-        }
+        return public_key, private_key
 
     def __del__(self):
-        # Clean up the temporary directory
+        # Clean up temporary directory
         if hasattr(self, 'gnupghome') and os.path.exists(self.gnupghome):
-            try:
-                shutil.rmtree(self.gnupghome, ignore_errors=True)
-            except Exception:
-                pass  # Ignore cleanup errors
+            shutil.rmtree(self.gnupghome)

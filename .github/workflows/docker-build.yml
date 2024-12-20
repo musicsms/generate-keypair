@@ -1,0 +1,16 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [ dev ]
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+
+jobs:
+  docker:
+    uses: ./.github/workflows/reusable-docker.yml
+    with:
+      push: true
+      platforms: 'linux/amd64,linux/arm64'
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
