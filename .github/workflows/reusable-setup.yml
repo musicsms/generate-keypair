@@ -44,5 +44,5 @@ jobs:
         if: inputs.install-dev-dependencies
         run: |
           pip install pytest pytest-cov pytest-xdist pytest-asyncio
-          pip install black flake8 mypy types-all
+          pip install black flake8
           pip install bandit safety

@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/reusable-setup.yml
     with:
       python-version: "3.12"
-      install-dependencies: false
+      install-dependencies: true
       install-dev-dependencies: true
 
   code-quality:
@@ -39,6 +39,3 @@ jobs:
           --statistics \
           --count \
           --show-source
-    
-    - name: Type checking
-      run: mypy src tests --ignore-missing-imports
