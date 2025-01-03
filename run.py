@@ -28,11 +28,15 @@ def run_streamlit():
         "--theme.secondaryBackgroundColor=#F0F2F6",
         "--theme.textColor=#262730",
         "--server.port=8501",
-        "--server.address=localhost",
+        "--server.address=0.0.0.0",  # Bind to all interfaces for production
     ]
 
     # Run Streamlit
-    sys.exit(stcli.main())
+    try:
+        sys.exit(stcli.main())
+    except Exception as e:
+        print(f"Failed to start Streamlit: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     run_streamlit()
