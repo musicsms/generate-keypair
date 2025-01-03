@@ -5,6 +5,7 @@ from frontend.utils import download_button, get_key_filename
 import tempfile
 import os
 from pathlib import Path
+import re
 
 def render_csr_section():
     st.markdown("### 📜 Certificate Signing Request (CSR) Generator")
@@ -161,6 +162,15 @@ def render_csr_section():
                 help="Department or division name",
                 key="csr_gen_ou_input"
             )
+            subject_alternative_names_input = st.text_area(
+                "Subject Alternative Names (SANs)",
+                help="Enter SANs separated by commas, spaces, or newlines",
+                key="csr_gen_san_input"
+            )
+
+    # Split SANs using regex to handle commas, newlines, and spaces
+    subject_alternative_names = re.split(r'[,\s\n]+', subject_alternative_names_input.strip())
+    subject_alternative_names = [san for san in subject_alternative_names if san]  # Remove any empty strings
 
     if st.button("📜 Generate CSR", key="csr_gen_create_button", use_container_width=True):
         if not st.session_state.key_file.exists():
@@ -183,9 +193,9 @@ def render_csr_section():
                 organization=organization if organization else None,
                 organizational_unit=org_unit if org_unit else None,
                 email=email if email else None,
-                password=st.session_state.csr_key_password
+                password=st.session_state.csr_key_password,
+                subject_alternative_names=subject_alternative_names if subject_alternative_names else None
             )
-
             st.success("CSR generated successfully!")
             
             # Display both private key and CSR

@@ -2,8 +2,9 @@ from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
-from typing import Optional
+from typing import Optional, Union, List
 from cryptography.exceptions import InvalidKey
+import ipaddress
 
 class CSRService:
     @staticmethod
@@ -16,7 +17,9 @@ class CSRService:
         organization: Optional[str] = None,
         organizational_unit: Optional[str] = None,
         email: Optional[str] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        subject_alternative_names: Optional[Union[str, List[str]]] = None
+
     ) -> str:
         """
         Generate a Certificate Signing Request (CSR) using a private key
@@ -30,6 +33,8 @@ class CSRService:
             organizational_unit: Organizational Unit (OU)
             email: Email Address
             password: Password if the private key is encrypted
+            subject_alternative_names: Optional list or comma-separated string of subject alternative names
+
         Returns:
             CSR in PEM format
         Raises:
@@ -75,15 +80,41 @@ class CSRService:
             if email:
                 subject.append(x509.NameAttribute(NameOID.EMAIL_ADDRESS, email))
 
-            # Generate CSR
-            csr = x509.CertificateSigningRequestBuilder().subject_name(
+            # Generate CSR builder
+            builder = x509.CertificateSigningRequestBuilder().subject_name(
                 x509.Name(subject)
-            ).sign(
+            )
+
+            # Add subject alternative names if provided
+            if subject_alternative_names:
+                if isinstance(subject_alternative_names, str):
+                    # Split by commas and trim whitespace
+                    san_entries = [san.strip() for san in subject_alternative_names.split(',')]
+                else:
+                    san_entries = subject_alternative_names
+
+                san_list = []
+                for san in san_entries:
+                    try:
+                        # Attempt to parse as IP address
+                        ip_address = ipaddress.ip_address(san)
+                        san_list.append(x509.IPAddress(ip_address))
+                    except ValueError:
+                        # If not an IP, treat as DNS name
+                        san_list.append(x509.DNSName(san))
+
+                if san_list:
+                    builder = builder.add_extension(
+                        x509.SubjectAlternativeName(san_list),
+                        critical=False,
+                    )
+
+            # Sign the CSR
+            csr = builder.sign(
                 private_key,
                 hashes.SHA256(),
                 default_backend()
             )
-
             # Return CSR in PEM format
             return csr.public_bytes(serialization.Encoding.PEM).decode()
 

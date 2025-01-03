@@ -17,6 +17,8 @@ class CSRRequest(BaseModel):
     organizational_unit: Optional[str] = Field(None, description="Organizational unit name")
     email: Optional[EmailStr] = Field(None, description="Email address")
     password: Optional[str] = Field(None, description="Optional password for private key")
+    subject_alternative_names: Optional[Union[str, List[str]]] = Field(None, description="Comma-separated SANs")
+
 
     @model_validator(mode="before")
     @classmethod
@@ -82,7 +84,8 @@ async def generate_csr(request: CSRRequest):
             organization=request.organization,
             organizational_unit=request.organizational_unit,
             email=request.email,
-            password=request.password
+            password=request.password,
+            subject_alternative_names=request.subject_alternative_names
         )
         
         return CSRResponse(
