@@ -11,6 +11,7 @@ from sections import (
     render_ssh_section,
     render_pgp_section,
     render_csr_section,
+    render_csr_sign_section,
     render_about_section
 )
 from styles import get_styles
@@ -29,12 +30,13 @@ def main():
     st.title("🔐 Secure Key Generator")
     st.markdown(get_styles(), unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🔑 Password Generator",
         "🔐 RSA Keys",
         "🔒 SSH Keys",
         "🔏 PGP Keys",
         "📜 CSR",
+        "🔏 CSR Signing",
         "ℹ️ About"
     ])
 
@@ -49,6 +51,8 @@ def main():
     with tab5:
         render_csr_section()
     with tab6:
+        render_csr_sign_section()
+    with tab7:
         render_about_section()
 
 if __name__ == "__main__":
