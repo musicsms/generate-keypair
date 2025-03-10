@@ -10,20 +10,21 @@ def generate_random_string(length: int = 8) -> str:
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 def get_key_filename(key_type: str, is_public: bool = False) -> str:
-    """Generate a filename for a key with timestamp and random string"""
+    """Generate a filename for a key with timestamp"""
     timestamp = datetime.datetime.now().strftime("%Y%m%d")
-    random_str = generate_random_string(6)
     
     if key_type.lower() == "ssh-rsa":
-        base = f"id_rsa_{timestamp}_{random_str}"
+        base = f"ssh_rsa_{timestamp}"
     elif key_type.lower() == "ssh-ed25519":
-        base = f"id_ed25519_{timestamp}_{random_str}"
+        base = f"ssh_ed25519_{timestamp}"
     elif key_type.lower() == "pgp":
-        base = f"pgp_key_{timestamp}_{random_str}"
+        base = f"pgp_keypair_{timestamp}"
+    elif key_type.lower() == "csr":
+        base = f"csr_{timestamp}"
     else:  # RSA
-        base = f"rsa_key_{timestamp}_{random_str}"
+        base = f"rsa_keypair_{timestamp}"
     
-    return f"{base}.pub" if is_public else base
+    return f"{base}.pub" if is_public else f"{base}.key"
 
 def download_button(content: str, filename: str, button_text: str, mime_type: str = "text/plain") -> None:
     """

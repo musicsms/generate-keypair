@@ -211,7 +211,7 @@ def render_csr_section():
                 st.markdown("##### Private Key (Keep Secret!):")
                 st.code(private_key_pem, language="text")
                 # Generate filename for private key
-                private_key_filename = f"{common_name.replace('*', 'wildcard').replace('.', '_')}.key"
+                private_key_filename = get_key_filename("csr", is_public=False)
                 download_button(
                     content=private_key_pem,
                     filename=private_key_filename,
@@ -222,8 +222,9 @@ def render_csr_section():
             with col2:
                 st.markdown("##### Certificate Signing Request (CSR):")
                 st.code(csr, language="text")
-                # Generate filename for CSR
-                csr_filename = f"{common_name.replace('*', 'wildcard').replace('.', '_')}.csr"
+                # Generate filename for CSR with a .csr extension
+                csr_basename = get_key_filename("csr", is_public=False).replace(".key", "")
+                csr_filename = f"{csr_basename}.csr"
                 download_button(
                     content=csr,
                     filename=csr_filename,
