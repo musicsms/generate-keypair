@@ -119,7 +119,7 @@ def render_csr_section():
             common_name = st.text_input(
                 "Common Name (CN)", 
                 value="example.com",
-                help="Domain name or server name (e.g., example.com)",
+                help="Domain name, server name, or IP address (e.g., example.com or 192.168.1.1)",
                 key="csr_gen_cn_input"
             )
             country = st.text_input(
@@ -161,6 +161,21 @@ def render_csr_section():
                 help="Department or division name",
                 key="csr_gen_ou_input"
             )
+            
+        # Add Subject Alternative Names field
+        st.markdown("##### Subject Alternative Names (SANs)")
+        st.markdown("Add additional domain names or IP addresses to be secured by this certificate.")
+        san_input = st.text_area(
+            "Subject Alternative Names",
+            placeholder="Enter one domain or IP per line (e.g., www.example.com, mail.example.com, 192.168.1.1)",
+            help="Each line will be treated as a separate SAN entry. These can be domain names or IP addresses that will be secured by the certificate.",
+            key="csr_gen_san_input"
+        )
+        
+        # Process SAN input into a list
+        subject_alternative_names = []
+        if san_input:
+            subject_alternative_names = [line.strip() for line in san_input.split('\n') if line.strip()]
 
     if st.button("📜 Generate CSR", key="csr_gen_create_button", use_container_width=True):
         if not st.session_state.key_file.exists():
@@ -183,7 +198,8 @@ def render_csr_section():
                 organization=organization if organization else None,
                 organizational_unit=org_unit if org_unit else None,
                 email=email if email else None,
-                password=st.session_state.csr_key_password
+                password=st.session_state.csr_key_password,
+                subject_alternative_names=subject_alternative_names if subject_alternative_names else None
             )
 
             st.success("CSR generated successfully!")

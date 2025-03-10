@@ -2,9 +2,27 @@ from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
-from typing import Optional
+from typing import Optional, List
+import ipaddress
 
 class CSRService:
+    @staticmethod
+    def is_ip_address(value: str) -> bool:
+        """
+        Check if a string is a valid IP address (IPv4 or IPv6)
+        
+        Args:
+            value: String to check
+            
+        Returns:
+            True if the string is an IP address, False otherwise
+        """
+        try:
+            ipaddress.ip_address(value)
+            return True
+        except ValueError:
+            return False
+
     @staticmethod
     def generate_csr(
         private_key_pem: str,
@@ -15,7 +33,8 @@ class CSRService:
         organization: Optional[str] = None,
         organizational_unit: Optional[str] = None,
         email: Optional[str] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        subject_alternative_names: Optional[List[str]] = None
     ) -> str:
         """
         Generate a Certificate Signing Request (CSR) using a private key
@@ -29,6 +48,7 @@ class CSRService:
             organizational_unit: Organizational Unit (OU)
             email: Email Address
             password: Password if the private key is encrypted
+            subject_alternative_names: List of Subject Alternative Names (SANs)
         Returns:
             CSR in PEM format
         Raises:
@@ -70,6 +90,37 @@ class CSRService:
             # Create CSR
             builder = x509.CertificateSigningRequestBuilder()
             builder = builder.subject_name(x509.Name(attributes))
+            
+            # Add Subject Alternative Names if provided
+            san_list = []
+            
+            # Add Common Name as SAN if it's an IP address
+            # The Common Name is already in the subject, but modern browsers expect
+            # all valid identifiers to be in the SAN extension as well
+            if CSRService.is_ip_address(common_name):
+                san_list.append(x509.IPAddress(ipaddress.ip_address(common_name)))
+            else:
+                san_list.append(x509.DNSName(common_name))
+            
+            # Add additional SANs if provided
+            if subject_alternative_names and len(subject_alternative_names) > 0:
+                for name in subject_alternative_names:
+                    if name and name.strip():
+                        name = name.strip()
+                        # Skip if it's identical to common_name (already added)
+                        if name == common_name:
+                            continue
+                        # Check if the name is an IP address
+                        if CSRService.is_ip_address(name):
+                            san_list.append(x509.IPAddress(ipaddress.ip_address(name)))
+                        else:
+                            san_list.append(x509.DNSName(name))
+            
+            if san_list:
+                builder = builder.add_extension(
+                    x509.SubjectAlternativeName(san_list),
+                    critical=False
+                )
             
             csr = builder.sign(
                 private_key=private_key,
