@@ -72,9 +72,18 @@ class CSRValidationService:
             
             # Extract basic information
             result = {
-                "valid": csr.is_signature_valid,
-                "version": csr.version.name
+                "valid": csr.is_signature_valid
             }
+            
+            # Try to get version - this might not be available in all cryptography versions
+            try:
+                version = getattr(csr, "version", None)
+                if version is not None and hasattr(version, "name"):
+                    result["version"] = version.name
+                else:
+                    result["version"] = "Unknown"
+            except (AttributeError, TypeError):
+                result["version"] = "v1"  # Most CSRs are v1 by default
             
             # Extract subject information
             subject = csr.subject
@@ -127,7 +136,13 @@ class CSRValidationService:
             elif isinstance(public_key, ec.EllipticCurvePublicKey):
                 key_info["algorithm"] = "ECC"
                 key_info["key_size"] = public_key.key_size
-                key_info["curve"] = public_key.curve.name
+                try:
+                    key_info["curve"] = public_key.curve.name
+                except AttributeError:
+                    # Fallback if curve name is not directly accessible
+                    curve_name = str(public_key.curve)
+                    curve_name = curve_name.split(".")[-1] if "." in curve_name else curve_name
+                    key_info["curve"] = curve_name
             elif isinstance(public_key, dsa.DSAPublicKey):
                 key_info["algorithm"] = "DSA"
                 key_info["key_size"] = public_key.key_size
@@ -137,8 +152,12 @@ class CSRValidationService:
             result["public_key"] = key_info
             
             # Extract signature algorithm
-            sig_alg = csr.signature_algorithm_oid
-            result["signature_algorithm"] = sig_alg._name
+            try:
+                sig_alg = csr.signature_algorithm_oid
+                result["signature_algorithm"] = sig_alg._name
+            except (AttributeError, TypeError):
+                # Fallback method to get signature algorithm
+                result["signature_algorithm"] = str(csr.signature_algorithm_oid).split('.')[-1]
             
             # Calculate fingerprints
             fingerprints = {}
@@ -173,7 +192,7 @@ class CSRValidationService:
                         sans.append({"type": "Other", "value": str(name)})
                 
                 extensions["subject_alternative_name"] = sans
-            except x509.ExtensionNotFound:
+            except (x509.ExtensionNotFound, AttributeError):
                 pass
             
             # Try to get other common extensions
@@ -192,7 +211,7 @@ class CSRValidationService:
                         extensions[name] = list(ext.value)
                     else:
                         extensions[name] = str(ext.value)
-                except x509.ExtensionNotFound:
+                except (x509.ExtensionNotFound, AttributeError):
                     pass
             
             result["extensions"] = extensions

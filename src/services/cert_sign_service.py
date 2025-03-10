@@ -250,22 +250,7 @@ class CertSignService:
             else:
                 raise
         return True
-    
-    def update_credentials(self, username: str, password: str):
-        """
-        Updates the credentials used against the ADCS server.
-        
-        Args:
-            username: The username for authentication
-            password: The password for authentication
-        """
-        if self.auth_method in ("ntlm", "cert"):
-            # NTLM and SSL are connection-based,
-            # so we need to close the connection
-            # to be able to re-authenticate
-            self.session.close()
-        self._set_credentials(username, password)
-        
+
     def list_templates(self) -> List[Dict[str, str]]:
         """
         List available certificate templates.
