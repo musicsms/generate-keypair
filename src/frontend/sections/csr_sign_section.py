@@ -1,6 +1,6 @@
 import streamlit as st
 from services.vault_service import VaultService
-from services.cert_sign_service import CertSignService, RequestDeniedException, CertificatePendingException, CouldNotRetrieveCertificateException
+from services.cert_sign_service import Certsrv, RequestDeniedException, CertificatePendingException, CouldNotRetrieveCertificateException
 from services.csr_validation_service import CSRValidationService
 import tempfile
 from pathlib import Path
@@ -282,7 +282,7 @@ def render_csr_sign_section():
                     
                 with st.spinner("Signing certificate..."):
                     # Initialize the cert signing service with credentials from Vault
-                    cert_service = CertSignService(
+                    cert_service = Certsrv(
                         server=adcs_server,
                         username=username,
                         password=password,
