@@ -298,6 +298,10 @@ def render_csr_sign_section():
                             encoding="b64"
                         )
                         
+                        # Ensure it's bytes
+                        if not isinstance(signed_cert, bytes):
+                            signed_cert = signed_cert.encode('utf-8')
+                            
                         st.session_state.signed_cert_pem = signed_cert
                         
                         with open(st.session_state.signed_cert_file, 'wb') as f:
@@ -305,6 +309,11 @@ def render_csr_sign_section():
                         
                         # Get the certificate chain
                         cert_chain = cert_service.get_chain(encoding="b64")
+                        
+                        # Ensure it's bytes
+                        if not isinstance(cert_chain, bytes):
+                            cert_chain = cert_chain.encode('utf-8')
+                            
                         st.session_state.cert_chain = cert_chain
                         
                         with open(st.session_state.cert_chain_file, 'wb') as f:
@@ -333,7 +342,8 @@ def render_csr_sign_section():
             download_button(
                 st.session_state.signed_cert_pem,
                 "signed_certificate.pem",
-                "Download Signed Certificate"
+                "Download Signed Certificate",
+                mime_type="application/x-pem-file"
             )
             
             with st.expander("View Certificate Content", expanded=False):
@@ -352,7 +362,8 @@ def render_csr_sign_section():
                 download_button(
                     st.session_state.cert_chain,
                     "certificate_chain.p7b",
-                    "Download Certificate Chain"
+                    "Download Certificate Chain",
+                    mime_type="application/pkcs7-mime"
                 )
                 
                 st.info("The certificate chain is in PKCS#7 format (.p7b)")

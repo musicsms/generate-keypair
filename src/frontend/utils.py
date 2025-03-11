@@ -26,10 +26,21 @@ def get_key_filename(key_type: str, is_public: bool = False) -> str:
     
     return f"{base}.pub" if is_public else f"{base}.key"
 
-def download_button(content: str, filename: str, button_text: str, mime_type: str = "text/plain") -> None:
+def download_button(content: Union[str, bytes], filename: str, button_text: str, mime_type: str = "text/plain") -> None:
     """
-    Create a download button for text content
+    Create a download button for text content or binary data
+    
+    Args:
+        content: String or bytes content to download
+        filename: Name of the file to download
+        button_text: Text to display on the button
+        mime_type: MIME type of the content
     """
-    b64 = base64.b64encode(content.encode()).decode()
+    if isinstance(content, str):
+        b64 = base64.b64encode(content.encode()).decode()
+    else:
+        # Content is already bytes
+        b64 = base64.b64encode(content).decode()
+        
     href = f'<a href="data:{mime_type};base64,{b64}" download="{filename}">{button_text}</a>'
     st.markdown(href, unsafe_allow_html=True)
