@@ -1,29 +1,41 @@
 """
-Certificate Signing Service for Microsoft ADCS (Active Directory Certificate Services)
-Based on the certsrv library: https://github.com/magnuswatn/certsrv
-"""
+A Python client for the Microsoft AD Certificate Services web page.
 
-import requests
+https://github.com/magnuswatn/certsrv
+"""
+import os
 import re
 import base64
 import logging
-from typing import Dict, Any, Optional, Tuple, List
-import os
+import warnings
+import requests
+
+__version__ = "2.1.1"
+
+logger = logging.getLogger(__name__)
+
+TIMEOUT = 30
+
 
 class RequestDeniedException(Exception):
     """Signifies that the request was denied by the ADCS server."""
+
     def __init__(self, message, response):
         Exception.__init__(self, message)
         self.response = response
+
 
 class CouldNotRetrieveCertificateException(Exception):
     """Signifies that the certificate could not be retrieved."""
+
     def __init__(self, message, response):
         Exception.__init__(self, message)
         self.response = response
 
+
 class CertificatePendingException(Exception):
     """Signifies that the request needs to be approved by a CA admin."""
+
     def __init__(self, req_id):
         Exception.__init__(
             self,
@@ -33,215 +45,267 @@ class CertificatePendingException(Exception):
         )
         self.req_id = req_id
 
-class CertSignService:
+
+class Certsrv(object):
     """
-    Service for signing Certificate Signing Requests (CSRs) using Microsoft ADCS.
+    Represents a Microsoft AD Certificate Services web server.
+
+    Args:
+        server: The FQDN to a server running the Certification Authority
+            Web Enrollment role (must be listening on https).
+        username: The username for authentication.
+        password: The password for authentication.
+        auth_method: The chosen authentication method. Either 'basic' (the default),
+            'ntlm' or 'cert' (SSL client certificate).
+        cafile: A PEM file containing the CA certificates that should be trusted.
+        timeout: The timeout to use against the CA server, in seconds.
+            The default is 30.
+
+    Note:
+        If you use a client certificate for authentication (auth_method=cert),
+        the username parameter should be the path to a certificate, and
+        the password parameter the path to a (unencrypted) private key.
     """
-    
-    def __init__(self, server: str, username: str, password: str, auth_method: str = "basic", timeout: int = 30):
-        """
-        Initialize the Certificate Signing Service.
-        
-        Args:
-            server: The FQDN to a server running the Certification Authority Web Enrollment role
-            username: The username for authentication
-            password: The password for authentication
-            auth_method: The authentication method ('basic', 'ntlm', or 'cert')
-            timeout: Request timeout in seconds
-        """
+
+    def __init__(self, server, username, password, auth_method="basic",
+                 cafile=None, timeout=TIMEOUT):
+
         self.server = server
         self.timeout = timeout
         self.auth_method = auth_method
         self.session = requests.Session()
-        
+
+        if cafile:
+            self.session.verify = cafile
+        else:
+            # requests uses it's own CA bundle by default
+            # but ADCS servers often have certificates
+            # from private CAs that are locally trusted,
+            # so we try to find, and use, the system bundle
+            # instead. Fallback to requests own.
+            self.session.verify = _get_ca_bundle()
+
         self._set_credentials(username, password)
-        
-    def _set_credentials(self, username: str, password: str):
-        """Set the credentials for authentication."""
-        if self.auth_method == "basic":
-            self.session.auth = (username, password)
-        elif self.auth_method == "ntlm":
+
+        # We need certsrv to think we are a browser,
+        # or otherwise the Content-Type of the retrieved
+        # certificate will be wrong (for some reason).
+        self.session.headers = {
+            "User-agent": "Mozilla/5.0 certsrv (https://github.com/magnuswatn/certsrv)"
+        }
+
+    def _set_credentials(self, username, password):
+        if self.auth_method == "ntlm":
             from requests_ntlm import HttpNtlmAuth
+
             self.session.auth = HttpNtlmAuth(username, password)
         elif self.auth_method == "cert":
             self.session.cert = (username, password)
         else:
-            raise ValueError(f"Unknown authentication method: {self.auth_method}")
-    
-    def _get(self, url: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
-        """Make a GET request to the server."""
-        response = self.session.get(url, params=params, timeout=self.timeout, verify=True)
+            self.session.auth = (username, password)
+
+    def _post(self, url, **kwargs):
+        response = self.session.post(url, timeout=self.timeout, **kwargs)
+        return self._handle_response(response)
+
+    def _get(self, url, **kwargs):
+        response = self.session.get(url, timeout=self.timeout, **kwargs)
+        return self._handle_response(response)
+
+    @staticmethod
+    def _handle_response(response):
+
+        logger.debug(
+            "Sent %s request to %s, with headers:\n%s\n\nand body:\n%s",
+            response.request.method,
+            response.request.url,
+            "\n".join(
+                ["{0}: {1}".format(k, v) for k, v in response.request.headers.items()]
+            ),
+            response.request.body,
+        )
+
+        try:
+            debug_content = response.content.decode()
+        except UnicodeDecodeError:
+            debug_content = base64.b64encode(response.content)
+
+        logger.debug(
+            "Recieved response:\nHTTP %s\n%s\n\n%s",
+            response.status_code,
+            "\n".join(["{0}: {1}".format(k, v) for k, v in response.headers.items()]),
+            debug_content,
+        )
+
         response.raise_for_status()
+
         return response
-    
-    def _post(self, url: str, data: Optional[Dict[str, Any]] = None) -> requests.Response:
-        """Make a POST request to the server."""
-        response = self.session.post(url, data=data, timeout=self.timeout, verify=True)
-        response.raise_for_status()
-        return response
-    
-    def get_cert(self, csr: str, template: str, encoding: str = "b64") -> str:
+
+    def get_cert(self, csr, template, encoding="b64", attributes=None):
         """
-        Request a certificate from the ADCS server.
-        
+        Gets a certificate from the ADCS server.
+
         Args:
-            csr: The CSR in PEM format
-            template: The certificate template to use
-            encoding: The desired encoding ('b64' for Base64/PEM or 'bin' for binary)
-            
+            csr: The certificate request to submit.
+            template: The certificate template the cert should be issued from.
+            encoding: The desired encoding for the returned certificate.
+                Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+            attributes: Additional Attributes (request attibutes) to be sent along with
+                the request.
+
         Returns:
-            The issued certificate in the specified encoding
-            
+            The issued certificate.
+
         Raises:
-            RequestDeniedException: If the request was denied
-            CertificatePendingException: If the request needs admin approval
-            CouldNotRetrieveCertificateException: If the certificate couldn't be retrieved
+            RequestDeniedException: If the request was denied by the ADCS server.
+            CertificatePendingException: If the request needs to be approved
+                by a CA admin.
+            CouldNotRetrieveCertificateException: If something went wrong while
+                fetching the cert.
         """
-        # Strip any header and footer from the CSR
-        csr = re.sub(r"-----BEGIN.*?-----", "", csr)
-        csr = re.sub(r"-----END.*?-----", "", csr)
-        # Remove all whitespace, including newlines
-        csr = re.sub(r"\s+", "", csr)
-        
-        cert_request_url = f"https://{self.server}/certsrv/certfnsh.asp"
-        cert_params = {
+        cert_attrib = "CertificateTemplate:{0}\r\n".format(template)
+        if attributes:
+            cert_attrib += attributes
+
+        data = {
             "Mode": "newreq",
             "CertRequest": csr,
-            "CertAttrib": f"CertificateTemplate:{template}",
+            "CertAttrib": cert_attrib,
+            "FriendlyType": "Saved-Request Certificate",
             "TargetStoreFlags": "0",
             "SaveCert": "yes",
         }
-        
-        response = self._post(cert_request_url, data=cert_params)
-        
-        # Check if the request was denied
-        if "denied by policy module" in response.text:
-            raise RequestDeniedException("Request denied by policy module", response.text)
-        
-        # Check if the request is pending
-        if "Your certificate request has been received" in response.text:
-            req_id_match = re.search(r"Your Request Id is (\d+)\.", response.text)
-            if req_id_match:
-                req_id = req_id_match.group(1)
+
+        url = "https://{0}/certsrv/certfnsh.asp".format(self.server)
+
+        response = self._post(url, data=data)
+
+        # We need to parse the Request ID from the returning HTML page
+        try:
+            req_id = re.search(r"certnew.cer\?ReqID=(\d+)&", response.text).group(1)
+        except AttributeError:
+            # We didn't find any request ID in the response. It may need approval.
+            if re.search(r"Certificate Pending", response.text):
+                req_id = re.search(r"Your Request Id is (\d+).", response.text).group(1)
                 raise CertificatePendingException(req_id)
             else:
-                raise CouldNotRetrieveCertificateException(
-                    "Certificate request is pending but could not find the Request ID",
-                    response.text
-                )
-        
-        # Extract the RequestId from the response
-        req_id_match = re.search(r"certnew.cer\?ReqID=(\d+)&", response.text)
-        if not req_id_match:
-            raise CouldNotRetrieveCertificateException(
-                "Could not find the Request ID in the response",
-                response.text
-            )
-        
-        req_id = req_id_match.group(1)
-        
-        # Now get the certificate
+                # Must have failed. Lets find the error message
+                # and raise a RequestDeniedException.
+                try:
+                    error = re.search(
+                        r'The disposition message is "([^"]+)', response.text
+                    ).group(1)
+                except AttributeError:
+                    error = "An unknown error occured"
+                raise RequestDeniedException(error, response.text)
+
         return self.get_existing_cert(req_id, encoding)
-    
-    def get_existing_cert(self, req_id: str, encoding: str = "b64") -> str:
+
+    def get_existing_cert(self, req_id, encoding="b64"):
         """
-        Get an existing certificate by request ID.
-        
+        Gets a certificate that has already been created from the ADCS server.
+
         Args:
-            req_id: The request ID of the certificate
-            encoding: The desired encoding ('b64' for Base64/PEM or 'bin' for binary)
-            
+            req_id: The request ID to retrieve.
+            encoding: The desired encoding for the returned certificate.
+                Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+
         Returns:
-            The issued certificate in the specified encoding
-            
+            The issued certificate.
+
         Raises:
-            CouldNotRetrieveCertificateException: If the certificate couldn't be retrieved
+            CouldNotRetrieveCertificateException: If something went wrong
+                while fetching the cert.
         """
-        cert_url = f"https://{self.server}/certsrv/certnew.cer"
+
+        cert_url = "https://{0}/certsrv/certnew.cer".format(self.server)
         params = {"ReqID": req_id, "Enc": encoding}
-        
-        cert_response = self._get(cert_url, params=params)
-        
-        # Verify the content type
-        content_type = cert_response.headers["Content-Type"]
-        if content_type != "application/pkix-cert" and content_type != "application/x-x509-ca-cert":
-            raise CouldNotRetrieveCertificateException(
-                f"Unexpected content type: {content_type}",
-                cert_response.text
-            )
-        
-        return cert_response.content
-    
-    def get_ca_cert(self, encoding: str = "b64") -> str:
+
+        response = self._get(cert_url, params=params)
+
+        if response.headers["Content-Type"] != "application/pkix-cert":
+            # The response was not a cert. Something must have gone wrong
+            try:
+                error = re.search(
+                    "Disposition message:[^\t]+\t\t([^\r\n]+)", response.text
+                ).group(1)
+
+            except AttributeError:
+                error = "An unknown error occured"
+            raise CouldNotRetrieveCertificateException(error, response.text)
+        else:
+            return response.content
+
+    def get_ca_cert(self, encoding="b64"):
         """
-        Get the CA certificate from the ADCS server.
-        
+        Gets the (newest) CA certificate from the ADCS server.
+
         Args:
-            encoding: The desired encoding ('b64' for Base64/PEM or 'bin' for binary)
-            
+            encoding: The desired encoding for the returned certificate.
+                Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+
         Returns:
-            The CA certificate in the specified encoding
+            The newest CA certificate from the server.
         """
-        cert_url = f"https://{self.server}/certsrv/certcarc.asp"
-        response = self._get(cert_url)
-        
-        # Extract the renewal index from the response
-        renewal_idx_match = re.search(r"certnew.cer\?ReqID=CACert&Renewal=(\d+)&", response.text)
-        if not renewal_idx_match:
+        url = "https://{0}/certsrv/certcarc.asp".format(self.server)
+
+        response = self._get(url)
+
+        # We have to check how many renewals this server has had,
+        # so that we get the newest CA cert.
+        renewals = re.search(r"var nRenewals=(\d+);", response.text).group(1)
+
+        cert_url = "https://{0}/certsrv/certnew.cer".format(self.server)
+        params = {"ReqID": "CACert", "Enc": encoding, "Renewal": renewals}
+
+        response = self._get(cert_url, params=params)
+
+        if response.headers["Content-Type"] != "application/pkix-cert":
             raise CouldNotRetrieveCertificateException(
-                "Could not find the renewal index",
-                response.text
+                "An unknown error occured", response.content
             )
-        
-        renewal_idx = renewal_idx_match.group(1)
-        
-        # Get the CA certificate
-        ca_cert_url = f"https://{self.server}/certsrv/certnew.cer"
-        params = {"ReqID": "CACert", "Renewal": renewal_idx, "Enc": encoding}
-        
-        ca_cert_response = self._get(ca_cert_url, params=params)
-        
-        # Verify the content type
-        content_type = ca_cert_response.headers["Content-Type"]
-        if content_type != "application/pkix-cert" and content_type != "application/x-x509-ca-cert":
-            raise CouldNotRetrieveCertificateException(
-                f"Unexpected content type: {content_type}",
-                ca_cert_response.text
-            )
-        
-        return ca_cert_response.content
-    
-    def get_chain(self, encoding: str = "bin") -> bytes:
+
+        return response.content
+
+    def get_chain(self, encoding="bin"):
         """
-        Get the certificate chain from the ADCS server.
-        
+        Gets the CA chain from the ADCS server.
+
         Args:
-            encoding: The desired encoding ('b64' for Base64/PEM or 'bin' for binary)
-            
+            encoding: The desired encoding for the returned certificates.
+                Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+
         Returns:
-            The certificate chain in PKCS#7 format
+            The CA chain from the server, in PKCS#7 format.
         """
-        chain_url = f"https://{self.server}/certsrv/certnew.p7b"
-        params = {"ReqID": "CACert", "Enc": encoding}
-        
+        url = "https://{0}/certsrv/certcarc.asp".format(self.server)
+
+        response = self._get(url)
+
+        # We have to check how many renewals this server has had, so that we get the newest chain
+        renewals = re.search(r"var nRenewals=(\d+);", response.text).group(1)
+
+        chain_url = "https://{0}/certsrv/certnew.p7b".format(self.server)
+        params = {"ReqID": "CACert", "Renewal": renewals, "Enc": encoding}
+
         chain_response = self._get(chain_url, params=params)
-        
+
         if chain_response.headers["Content-Type"] != "application/x-pkcs7-certificates":
             raise CouldNotRetrieveCertificateException(
-                "An unknown error occurred",
-                chain_response.content
+                "An unknown error occured", chain_response.content
             )
-        
+
         return chain_response.content
-    
-    def check_credentials(self) -> bool:
+
+    def check_credentials(self):
         """
         Checks the specified credentials against the ADCS server.
-        
+
         Returns:
-            True if authentication succeeded, False if it failed
+            True if authentication succeeded, False if it failed.
         """
-        url = f"https://{self.server}/certsrv/"
+        url = "https://{0}/certsrv/".format(self.server)
+
         try:
             self._get(url)
         except requests.exceptions.HTTPError as error:
@@ -251,34 +315,190 @@ class CertSignService:
                 raise
         return True
 
-    def list_templates(self) -> List[Dict[str, str]]:
+    def update_credentials(self, username, password):
         """
-        List available certificate templates.
-        
-        Returns:
-            List of dictionaries containing template information
+        Updates the credentials used against the ADCS server.
+
+        Args:
+            username: The username for authentication.
+            password: The password for authentication.
         """
-        # In a real implementation, this would fetch templates from the ADCS server
-        # For now, we'll return a static list of common templates
-        return [
-            {
-                "id": "WebServer",
-                "name": "Web Server",
-                "description": "Certificate for SSL/TLS web servers"
-            },
-            {
-                "id": "CodeSigning",
-                "name": "Code Signing",
-                "description": "Certificate for signing code"
-            },
-            {
-                "id": "ClientAuth",
-                "name": "Client Authentication",
-                "description": "Certificate for client authentication"
-            },
-            {
-                "id": "SmartcardLogon",
-                "name": "Smartcard Logon",
-                "description": "Certificate for smartcard logon"
-            }
-        ]
+        if self.auth_method in ("ntlm", "cert"):
+            # NTLM and SSL is connection based,
+            # so we need to close the connection
+            # to be able to re-authenticate
+            self.session.close()
+        self._set_credentials(username, password)
+
+def _get_ca_bundle():
+    """Tries to find the platform ca bundle for the system (on linux systems)"""
+    ca_bundles = [
+        # list taken from https://golang.org/src/crypto/x509/root_linux.go
+        "/etc/ssl/certs/ca-certificates.crt",                # Debian/Ubuntu/Gentoo etc.
+        "/etc/pki/tls/certs/ca-bundle.crt",                  # Fedora/RHEL 6
+        "/etc/ssl/ca-bundle.pem",                            # OpenSUSE
+        "/etc/pki/tls/cacert.pem",                           # OpenELEC
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", # CentOS/RHEL 7
+    ]
+    for ca_bundle in ca_bundles:
+        if os.path.isfile(ca_bundle):
+            return ca_bundle
+    # if the bundle was not found, we revert back to requests own
+    return True
+
+def get_cert(server, csr, template, username, password, encoding="b64", **kwargs):
+    """
+    Gets a certificate from a Microsoft AD Certificate Services web page.
+
+    Args:
+        server: The FQDN to a server running the Certification Authority
+            Web Enrollment role (must be listening on https).
+        csr: The certificate request to submit.
+        template: The certificate template the cert should be issued from.
+        username: The username for authentication.
+        pasword: The password for authentication.
+        encoding: The desired encoding for the returned certificate.
+            Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+        auth_method: The chosen authentication method. Either 'basic' (the default),
+            'ntlm' or 'cert' (ssl client certificate).
+        cafile: A PEM file containing the CA certificates that should be trusted.
+
+    Returns:
+        The issued certificate.
+
+    Raises:
+        RequestDeniedException: If the request was denied by the ADCS server.
+        CertificatePendingException: If the request needs to be approved by a CA admin.
+        CouldNotRetrieveCertificateException: If something went wrong while
+            fetching the cert.
+
+    Note:
+        This method is deprecated.
+
+    """
+    warnings.warn(
+        "This function is deprecated. Use the method on the Certsrv class instead",
+        DeprecationWarning,
+    )
+    certsrv = Certsrv(server, username, password, **kwargs)
+    return certsrv.get_cert(csr, template, encoding)
+
+
+def get_existing_cert(server, req_id, username, password, encoding="b64", **kwargs):
+    """
+    Gets a certificate that has already been created from a
+    Microsoft AD Certificate Services web page.
+
+    Args:
+        server: The FQDN to a server running the Certification Authority
+            Web Enrollment role (must be listening on https).
+        req_id: The request ID to retrieve.
+        username: The username for authentication.
+        pasword: The password for authentication.
+        encoding: The desired encoding for the returned certificate.
+            Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+        auth_method: The chosen authentication method. Either 'basic' (the default),
+            'ntlm' or 'cert' (ssl client certificate).
+        cafile: A PEM file containing the CA certificates that should be trusted.
+
+    Returns:
+        The issued certificate.
+
+    Raises:
+        CouldNotRetrieveCertificateException: If something went wrong while
+            fetching the cert.
+
+    Note:
+        This method is deprecated.
+    """
+    warnings.warn(
+        "This function is deprecated. Use the method on the Certsrv class instead",
+        DeprecationWarning,
+    )
+    certsrv = Certsrv(server, username, password, **kwargs)
+    return certsrv.get_existing_cert(req_id, encoding)
+
+
+def get_ca_cert(server, username, password, encoding="b64", **kwargs):
+    """
+    Gets the (newest) CA certificate from a Microsoft AD Certificate Services web page.
+
+    Args:
+        server: The FQDN to a server running the Certification Authority
+            Web Enrollment role (must be listening on https).
+        username: The username for authentication.
+        pasword: The password for authentication.
+        encoding: The desired encoding for the returned certificate.
+            Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+        auth_method: The chosen authentication method. Either 'basic' (the default),
+            'ntlm' or 'cert' (ssl client certificate).
+        cafile: A PEM file containing the CA certificates that should be trusted.
+
+    Returns:
+        The newest CA certificate from the server.
+
+    Note:
+        This method is deprecated.
+    """
+    warnings.warn(
+        "This function is deprecated. Use the method on the Certsrv class instead",
+        DeprecationWarning,
+    )
+    certsrv = Certsrv(server, username, password, **kwargs)
+    return certsrv.get_ca_cert(encoding)
+
+
+def get_chain(server, username, password, encoding="bin", **kwargs):
+    """
+    Gets the chain from a Microsoft AD Certificate Services web page.
+
+    Args:
+        server: The FQDN to a server running the Certification Authority
+            Web Enrollment role (must be listening on https).
+        username: The username for authentication.
+        pasword: The password for authentication.
+        encoding: The desired encoding for the returned certificates.
+            Possible values are 'bin' for binary and 'b64' for Base64 (PEM).
+        auth_method: The chosen authentication method. Either 'basic' (the default),
+            'ntlm' or 'cert' (ssl client certificate).
+        cafile: A PEM file containing the CA certificates that should be trusted.
+
+    Returns:
+        The CA chain from the server, in PKCS#7 format.
+
+    Note:
+        This method is deprecated.
+    """
+    warnings.warn(
+        "This function is deprecated. Use the method on the Certsrv class instead",
+        DeprecationWarning,
+    )
+    certsrv = Certsrv(server, username, password, **kwargs)
+    return certsrv.get_chain(encoding)
+
+
+def check_credentials(server, username, password, **kwargs):
+    """
+    Checks the specified credentials against the specified ADCS server.
+
+    Args:
+        ca: The FQDN to a server running the Certification Authority
+            Web Enrollment role (must be listening on https).
+        username: The username for authentication.
+        pasword: The password for authentication.
+        auth_method: The chosen authentication method. Either 'basic' (the default),
+            'ntlm' or 'cert' (ssl client certificate).
+        cafile: A PEM file containing the CA certificates that should be trusted.
+
+    Returns:
+        True if authentication succeeded, False if it failed.
+
+    Note:
+        This method is deprecated.
+    """
+    warnings.warn(
+        "This function is deprecated. Use the method on the Certsrv class instead",
+        DeprecationWarning,
+    )
+    certsrv = Certsrv(server, username, password, **kwargs)
+    return certsrv.check_credentials()

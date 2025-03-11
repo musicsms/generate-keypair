@@ -286,7 +286,8 @@ def render_csr_sign_section():
                         server=adcs_server,
                         username=username,
                         password=password,
-                        auth_method=auth_method
+                        auth_method=auth_method,
+                        cafile=None,
                     )
                     
                     # Sign the CSR
